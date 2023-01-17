@@ -10,3 +10,4 @@
     conda install tensorflow
     pip install librosa pyaudio ipykernel matplotlib
     ```
+3. Download `data/training_data_wav` from Teams into this `/training` folder
