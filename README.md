@@ -45,4 +45,4 @@ The goal of this project is to provide a system that runs entirely locally for s
     ```
     git clone https://github.com/parkuman/capstone.git
     ```
-2. Once clones, check the READMEs in the other folders to see how to install those.
+2. Once cloned, check the READMEs in the other folders to see how to install those components.
