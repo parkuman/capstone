@@ -15,10 +15,10 @@
 	/**
 	 * Creates a WAV header we can use to make each raw audio chunk understandable as
 	 * a WAV file.
-	 * 
+	 *
 	 * The first chunk of audio will already have this, but for subsequent ones
 	 * we need to add this ourselves
-	 * 
+	 *
 	 * See: https://github.com/chrisguttandin/extendable-media-recorder/issues/638
 	 * */
 	const wavHeader = (bitRate, numberOfChannels, numberOfSamples, sampleRate = Infinity) => {

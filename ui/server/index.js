@@ -4,7 +4,7 @@ import express from "express";
 import { Server } from "socket.io";
 
 import { handler } from "../build/handler.js";
-import handleSocket from "./handleSocket.js"
+import handleSocket from "./handleSocket.js";
 
 const PORT = process.env.PORT || 3000;
 
