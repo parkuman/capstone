@@ -34,7 +34,7 @@ def handle_message(data):
     
     print("\nreceived audio chunk:\n", data[44:])
     print("\n\n\n\nDATA HEADER:\n", data[:44])
-    save_blob_to_file(data, is_first)
+    save_blob_to_file(data)
 
     audio_bytes += data if is_first else data[44:] # if its not the first chunk, get rid of WAV header (first 44 bytes)
     is_first = False
