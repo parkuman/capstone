@@ -15,6 +15,7 @@
 	let awaitingTranscription = false;
 	let isFirstChunk = true;
 	let finalTranscription = "";
+	let currentSpeaker = "";
 
 	async function getMicrophone() {
 		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -66,6 +67,7 @@
 		isRecording = true;
 		isFirstChunk = true;
 		finalTranscription = "";
+		currentSpeaker = "";
 	}
 
 	function endTranscription() {
@@ -73,6 +75,7 @@
 		mediaRecorder.stop();
 		socket.emit("end_transcription");
 		awaitingTranscription = true;
+		currentSpeaker = "";
 	}
 
 	onMount(async () => {
@@ -97,13 +100,21 @@
 			finalTranscription = data.join("<br />");
 			awaitingTranscription = false;
 		});
+
+		socket.on("current_speaker", (data) => {
+			console.log("current_speaker: ", data);
+			currentSpeaker = data;
+		});
 	});
 </script>
 
 <button on:click={beginTranscription} disabled={isRecording || awaitingTranscription}>Record</button>
 <button on:click={endTranscription} disabled={!isRecording || awaitingTranscription}>Stop</button>
 
-<h1>Transcription</h1>
+<h1>Current Speaker</h1>
+<p>{currentSpeaker}</p>
+
+<h1>Transcript</h1>
 {#if awaitingTranscription}
 	<p>transcribing...</p>
 {/if}

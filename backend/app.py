@@ -1,26 +1,52 @@
 import tempfile
-import threading
 import subprocess
+import logging
 
+import numpy as np
 import librosa    
 import soundfile as sf
+import tensorflow as tf
 
 from flask import Flask
 from flask_socketio import SocketIO, send, emit
 
+from utils.extract_features import extract_features
+
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", logger = False)
+logging.getLogger("werkzeug").setLevel(logging.ERROR) # flask
+logging.getLogger("socketio").setLevel(logging.ERROR) # socketio
+logging.getLogger("engineio").setLevel(logging.ERROR)
 
 FILE_NAME = "audio"
 audio_bytes = b""
 is_first = True
 
+model = tf.keras.models.load_model("../saved_models/4_classes-02_05_2023_14_24_15")
+speakers = ["hannah", "aiden", "parker", "adam"]
+
+"""
+Write a blob of wav data as a temporary file where we can then load that 
+file and predict who is speaking in it using librosa and our trained 
+model. 
+"""
 def save_blob_to_file(blob):
+    # create and save temp file
     fp = tempfile.NamedTemporaryFile()
     print("\nTEMP FILE NAME" + fp.name)
     fp.write(blob) 
-    # fp.seek(0)
-    # fp.close()
+    fp.seek(0)
+
+    # make a prediction on it
+    temp_audio_file = fp.name
+    y, sr = librosa.load(temp_audio_file, offset=0, duration=30)
+    test_frame_features = extract_features(y, sr)
+    pred = model.predict(test_frame_features.reshape(1,len(test_frame_features)))
+    idx = np.argmax(pred)
+    print("SPEAKER: " + speakers[idx])
+    emit("current_speaker", speakers[idx])
+
+    fp.close()
 
 def save_wav_16(bytes: bytes, file_name):
     # write audio bytes to wav file
@@ -31,37 +57,35 @@ def save_wav_16(bytes: bytes, file_name):
     sf.write(file_name + "_16.wav", y, sr, "PCM_16")   # save the 16KHz file as 16 bit (also for whisper)
 
 
-def popenAndCall(onExit, *popenArgs, **popenKWArgs):
-    """
-    Runs a subprocess.Popen, and then calls the function onExit when the
-    subprocess completes.
-
-    Use it exactly the way you'd normally use subprocess.Popen, except include a
-    callable to execute as the first argument. onExit is a callable object, and
-    *popenArgs and **popenKWArgs are simply passed up to subprocess.Popen.
-    """
-    def runInThread(onExit, popenArgs, popenKWArgs):
-        proc = subprocess.Popen(*popenArgs, **popenKWArgs)
-        proc.wait()
-        onExit()
-        return
-
-    thread = threading.Thread(target=runInThread,
-                              args=(onExit, popenArgs, popenKWArgs))
-    thread.start()
-
-    return thread # returns immediately after the thread starts
-
 
 def transcribe(file_name):
-    subprocess.run(["./main", "-f", "../capstone/ui/server-py/" + file_name + "_16.wav", 
+    # whisper transcribe
+    subprocess.run(["./main", "-f", "../backend/" + file_name + "_16.wav", 
                     "--model", "models/ggml-large.bin", 
                     "--output-txt"], 
-                    cwd="/home/parker/code/whisper.cpp")
+                    cwd="../whisper.cpp")
     
     with open(file_name + "_16.wav.txt", "r") as f:
         contents = f.readlines()
         emit("finished_transcription", contents)
+
+
+def identify_speakers(file_name):
+    # model prediction
+    test_file_path = file_name + "_16.wav"
+    sr = librosa.get_samplerate(test_file_path)
+    stream = librosa.stream(test_file_path,
+                        block_length=256,
+                        frame_length=2048,
+                        hop_length=512)
+
+    
+    for y in stream:
+        test_frame_features = extract_features(y, sr)
+        pred = model.predict(test_frame_features.reshape(1,len(test_frame_features)))
+        idx = np.argmax(pred)
+        print(speakers[idx])
+
 
 
 @socketio.on("connect")
@@ -92,8 +116,11 @@ def handle_message(data):
 @socketio.on("end_transcription")
 def handle_message():
     print("\===============| end_transcription |===============\n")
+
     save_wav_16(audio_bytes, FILE_NAME)
-    transcribe(FILE_NAME)
+
+    # transcribe(FILE_NAME)
+    # identify_speakers(FILE_NAME)
 
 
 if __name__ == "__main__":

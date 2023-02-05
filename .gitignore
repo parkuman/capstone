@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+
+# ignore any saved models but keep the folder
+saved_models/*/
