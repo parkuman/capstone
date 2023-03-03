@@ -105,6 +105,10 @@
 			console.log("current_speaker: ", data);
 			currentSpeaker = data;
 		});
+
+		socket.on("transcript_chunk", (data) => {
+			console.log("transcription_chunk: ", data);
+		});
 	});
 </script>
 
