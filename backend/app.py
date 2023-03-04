@@ -19,6 +19,9 @@ from utils.extract_features import extract_features
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+model = tf.keras.models.load_model("../saved_models/4_classes-03_03_2023_15_08_18", compile=False)
+model.compile()
+
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", logger = False)
 logging.getLogger("werkzeug").setLevel(logging.ERROR) # flask
@@ -30,9 +33,7 @@ audio_bytes = b""
 is_first = True
 total_time = 0
 
-model = tf.keras.models.load_model("../saved_models/4_classes-02_05_2023_14_24_15")
 speakers = ["hannah", "aiden", "parker", "adam"]
-
 total_transcript = []
 
 """
@@ -100,9 +101,9 @@ def identify_speakers(file_name):
     test_file_path = file_name + "_16.wav"
     sr = librosa.get_samplerate(test_file_path)
     stream = librosa.stream(test_file_path,
-                        block_length=256,
-                        frame_length=2048,
-                        hop_length=512)
+                            block_length=1,
+                            frame_length=int(sr*0.04),
+                            hop_length=int(sr*0.04))
 
     
     for y in stream:
@@ -138,7 +139,7 @@ def handle_message(data):
 
     # make a prediction on it
     temp_audio_file = file_pointer.name
-    y, sr = librosa.load(temp_audio_file, offset=0, duration=30)
+    y, sr = librosa.load(temp_audio_file, offset=0, duration=2)
     test_frame_features = extract_features(y, sr)
     pred = model.predict(test_frame_features.reshape(1,len(test_frame_features)))
     idx = np.argmax(pred)
