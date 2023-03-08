@@ -17,6 +17,8 @@
 	let finalTranscription = "";
 	let currentSpeaker = "";
 
+	let runningTranscriptions =  {};
+
 	async function getMicrophone() {
 		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 		const audioTrack = stream.getAudioTracks()[0];
@@ -36,7 +38,7 @@
 					: new Blob(
 							[
 								wavHeader(
-									audioSettings.sampleSize,
+									audioSettings.sampleSize as number,
 									audioSettings.channelCount,
 									Infinity,
 									audioSettings.sampleRate
@@ -64,16 +66,19 @@
 	function beginTranscription() {
 		console.log("beginTranscription() - emitting begin_transcription with: ", audioSettings);
 		socket.emit("begin_transcription", audioSettings); // ask to send audio
+
 		isRecording = true;
 		isFirstChunk = true;
 		finalTranscription = "";
 		currentSpeaker = "";
+		runningTranscriptions = {};
 	}
 
 	function endTranscription() {
 		isRecording = false;
 		mediaRecorder.stop();
 		socket.emit("end_transcription");
+
 		awaitingTranscription = true;
 		currentSpeaker = "";
 	}
@@ -97,7 +102,7 @@
 
 		socket.on("finished_transcription", (data) => {
 			console.log("finished_transcription", data);
-			finalTranscription = data.join("<br />");
+			finalTranscription = data;
 			awaitingTranscription = false;
 		});
 
@@ -106,8 +111,18 @@
 			currentSpeaker = data;
 		});
 
-		socket.on("transcript_chunk", (data) => {
-			console.log("transcription_chunk: ", data);
+		socket.on("transcript_update", (data) => {
+			console.log("\n\nnew transcript update: ", data);
+			runningTranscriptions[data.id] = data.text;
+
+			// on next frame (after state update), scroll to the latest transcript output
+			requestAnimationFrame(() => {
+				const output = document.getElementById("transcriptEnd");
+				if (!output) return;
+				output.scrollIntoView({
+					behavior: "smooth"
+				});
+			});
 		});
 	});
 </script>
@@ -118,8 +133,19 @@
 <h1>Current Speaker</h1>
 <p>{currentSpeaker}</p>
 
-<h1>Transcript</h1>
+<h1>Live Transcript</h1>
+
+{#each Object.entries(runningTranscriptions) as [id, phrase] (id)}
+	<p><b>{id}</b></p>
+	<p>{phrase}</p>
+	<br />
+{/each}
+
+<!-- anchor used to scroll to -->
+<br id="transcriptEnd"/>
+
+<h1>Final Transcript</h1>
 {#if awaitingTranscription}
 	<p>transcribing...</p>
 {/if}
-<p>{@html finalTranscription}</p>
+<p>{finalTranscription}</p>
