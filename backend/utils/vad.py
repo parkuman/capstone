@@ -2,7 +2,6 @@ import torch
 
 SAMPLING_RATE = 16000
 
-# TODO save locally
 model, utils = torch.hub.load(repo_or_dir="../vad",
                               model="silero_vad",
                               force_reload=True,
