@@ -113,7 +113,7 @@
 
 		socket.on("transcript_update", (data) => {
 			console.log("\n\nnew transcript update: ", data);
-			runningTranscriptions[data.id] = data.text;
+			runningTranscriptions[data.id] = { text: data.text, speaker: data.speaker };
 
 			// on next frame (after state update), scroll to the latest transcript output
 			requestAnimationFrame(() => {
@@ -135,9 +135,9 @@
 
 <h1>Live Transcript</h1>
 
-{#each Object.entries(runningTranscriptions) as [id, phrase] (id)}
-	<p><b>{id}</b></p>
-	<p>{phrase}</p>
+{#each Object.entries(runningTranscriptions) as [id, entry] (id)}
+	<p><b>{id} - {entry.speaker}</b></p>
+	<p>{entry.text}</p>
 	<br />
 {/each}
 

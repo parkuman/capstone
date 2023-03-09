@@ -172,7 +172,7 @@ def handle_message(data):
         last_phrase_time = now
 
         # make a prediction on who is speaking in the chunk and emit it back to the client
-        # current_speaker = identify_speaker(temp_file_path)
+        current_speaker = identify_speaker(temp_file_path)
         # emit("current_speaker", current_speaker)
 
         # append this audio to the buffer since the person is speaking.
@@ -189,7 +189,8 @@ def handle_message(data):
 
         output = {
             "id": phrase_id,
-            "text": running_transcript
+            "text": running_transcript,
+            "speaker": current_speaker
         }
 
         print("TRANSCRIPT: ", str(output))
