@@ -141,6 +141,11 @@
 	<br />
 {/each}
 
+<!-- <h2>current</h2>
+{#key runningTranscriptions[currentPhraseId]}
+<p></p>
+{/key} -->
+
 <!-- anchor used to scroll to -->
 <br id="transcriptEnd"/>
 

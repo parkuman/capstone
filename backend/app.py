@@ -19,6 +19,9 @@ from utils.strip_wav_header import strip_wav_header
 
 
 transcription_model = whisper.load_model("tiny.en")
+# whisper_options = whisper.DecodingOptions().__dict__.copy()
+# whisper_options['no_speech_threshold'] = 0.275
+# whisper_options['logprob_threshold'] = None
 
 speaker_model = tf.keras.models.load_model("../saved_models/4_classes-03_03_2023_15_08_18", compile=False)
 speaker_model.compile()
@@ -66,8 +69,10 @@ def save_wav_16(bytes: bytes, file_name):
 
 
 def transcribe(file_name):
+
     result = transcription_model.transcribe(file_name, fp16=torch.cuda.is_available())
     text = result['text'].strip()
+    # print(str(result))
     return text
 
 def transcribe_cpp(file_name, is_final=False):

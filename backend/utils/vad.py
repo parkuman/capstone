@@ -3,9 +3,10 @@ import torch
 SAMPLING_RATE = 16000
 
 # TODO save locally
-model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                              model='silero_vad',
+model, utils = torch.hub.load(repo_or_dir="../vad",
+                              model="silero_vad",
                               force_reload=True,
+                              source="local",
                               onnx=False)
 
 (get_speech_timestamps,
