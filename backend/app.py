@@ -17,13 +17,15 @@ from utils.extract_features import extract_features
 from utils.vad import is_speaking
 from utils.strip_wav_header import strip_wav_header
 
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
 
 transcription_model = whisper.load_model("tiny.en")
 # whisper_options = whisper.DecodingOptions().__dict__.copy()
 # whisper_options['no_speech_threshold'] = 0.275
 # whisper_options['logprob_threshold'] = None
 
-speaker_model = tf.keras.models.load_model("../saved_models/4_classes-03_03_2023_15_08_18", compile=False)
+speaker_model = tf.keras.models.load_model("../saved_models/4_classes_best_aiden", compile=False)
 speaker_model.compile()
 
 app = Flask(__name__)
@@ -36,7 +38,7 @@ FILE_NAME = "audio"
 audio_bytes = b""
 is_first = True
 
-speakers = ["hannah", "aiden", "parker", "adam"]
+speakers = ["adam", "aiden", "hannah", "parker"]
 total_transcript = []
 
 # running phrase vars
@@ -69,7 +71,6 @@ def save_wav_16(bytes: bytes, file_name):
 
 
 def transcribe(file_name):
-
     result = transcription_model.transcribe(file_name, fp16=torch.cuda.is_available())
     text = result['text'].strip()
     # print(str(result))
@@ -93,15 +94,38 @@ def transcribe_cpp(file_name, is_final=False):
 """
 Identifies who is speaking in a given audio file and returns the result. 
 """
-def identify_speaker(file_name):
-    y, sr = librosa.load(file_name, offset=0)
-    test_frame_features = extract_features(y, sr)
-    pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
-    idx = np.argmax(pred)
+def identify_speaker(file_name, average=False):
+    duration = 1000 # ms - duration of the split audio clip in ms
 
-    current_speaker = speakers[idx]
-    # print("SPEAKER: " + current_speaker)
-    return current_speaker
+    if average:
+        sr = librosa.get_samplerate(file_name)
+        print("SAMPLE RATE: ", str(sr))
+        stream = librosa.stream(file_name,
+                            block_length=64, 
+                            frame_length=int(sr * duration / 1000),
+                            hop_length=int(sr * duration / 1000) * 0.5)
+        
+        predictions = []
+        # create 40ms clips of audio features to feed into the model and get the output
+        for y in stream:
+            y = (y - min(y)) / (np.max(y) - np.min(y)) # normalize audio before extracting features
+            test_frame_features = extract_features(y, sr)
+            pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
+            idx = np.argmax(pred)
+            predictions.append(speakers[idx])
+
+        print("PREDICTIONS: " + str(predictions))
+
+    else:
+        y, sr = librosa.load(file_name, offset=0)
+        print("SAMPLE RATE: ", str(sr))
+        test_frame_features = extract_features(y, sr)
+        pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
+        idx = np.argmax(pred)
+
+        current_speaker = speakers[idx]
+        # print("SPEAKER: " + current_speaker)
+        return current_speaker
 
 
 def final_identify_speakers(file_name):
@@ -112,7 +136,6 @@ def final_identify_speakers(file_name):
                             block_length=1,
                             frame_length=int(sr*0.04),
                             hop_length=int(sr*0.04))
-
     
     for y in stream:
         test_frame_features = extract_features(y, sr)
@@ -121,10 +144,10 @@ def final_identify_speakers(file_name):
         print(speakers[idx])
 
 
-
 @socketio.on("connect")
 def handle_message(data):
-    print("client connected!")
+    print("===============| Browser Client Connected! |===============\n")
+    # identify_speaker("1sec.wav", average=True)
 
 @socketio.on("begin_transcription")
 def handle_message(data):
