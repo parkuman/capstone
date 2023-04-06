@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import tempfile
-import subprocess
 import logging
+import concurrent.futures
 
 import numpy as np
 import librosa    
@@ -16,16 +16,16 @@ from flask_socketio import SocketIO, send, emit
 from utils.extract_features import extract_features
 from utils.vad import is_speaking
 from utils.strip_wav_header import strip_wav_header
+from utils.SpeakerHistory import SpeakerHistoryQueue
 
-print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-
+print("Num GPUs Available to TensorFlow: ", len(tf.config.list_physical_devices('GPU')))
 
 transcription_model = whisper.load_model("tiny.en")
 # whisper_options = whisper.DecodingOptions().__dict__.copy()
 # whisper_options['no_speech_threshold'] = 0.275
 # whisper_options['logprob_threshold'] = None
 
-speaker_model = tf.keras.models.load_model("../saved_models/4_classes_best_aiden", compile=False)
+speaker_model = tf.keras.models.load_model("../saved_models/4_classes-04_05_2023_22_58_25", compile=False)
 speaker_model.compile()
 
 app = Flask(__name__)
@@ -38,14 +38,23 @@ FILE_NAME = "audio"
 audio_bytes = b""
 is_first = True
 
-speakers = ["adam", "aiden", "hannah", "parker"]
+torch_use_gpu = torch.cuda.is_available()
+speakers = ['hannah', 'aiden', 'parker', 'adam']
 total_transcript = []
 
+
 # running phrase vars
+last_output = None
 phrase_audio_buffer = b""
 phrase_timeout = 2 # seconds of silence required for a new phrase to start in live transcription
 last_phrase_time = None
 phrase_id = 0
+phrase_class_counts = {speaker: 0 for speaker in speakers} # creates a dictionary where the keys are the speaker names 
+                                                           # and the values are a counter of how many times the speaker 
+                                                           # detection thought it was them in a running phrase
+
+running_speaker_history = SpeakerHistoryQueue(speakers)
+
 
 """
 Write a blob of wav data as a temporary file where we can then load that 
@@ -71,25 +80,10 @@ def save_wav_16(bytes: bytes, file_name):
 
 
 def transcribe(file_name):
-    result = transcription_model.transcribe(file_name, fp16=torch.cuda.is_available())
+    result = transcription_model.transcribe(file_name, fp16=False)
     text = result['text'].strip()
     # print(str(result))
     return text
-
-def transcribe_cpp(file_name, is_final=False):
-    # whisper transcribe
-    subprocess.run(["./main", "-f", "../backend/" + file_name + "_16.wav", 
-                    "--model", "models/ggml-large.bin", 
-                    "--output-txt"], 
-                    cwd="../whisper.cpp")
-    
-    with open(file_name + "_16.wav.txt", "r") as f:
-        contents = f.readlines()
-
-        if is_final:
-            emit("finished_transcription", contents)
-        else: 
-            emit("transcription_chunk", contents)
 
 """
 Identifies who is speaking in a given audio file and returns the result. 
@@ -108,8 +102,8 @@ def identify_speaker(file_name, average=False):
         predictions = []
         # create 40ms clips of audio features to feed into the model and get the output
         for y in stream:
-            y = (y - min(y)) / (np.max(y) - np.min(y)) # normalize audio before extracting features
-            test_frame_features = extract_features(y, sr)
+            normalized_y = librosa.util.normalize(y)
+            test_frame_features = extract_features(normalized_y, sr)
             pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
             idx = np.argmax(pred)
             predictions.append(speakers[idx])
@@ -118,53 +112,57 @@ def identify_speaker(file_name, average=False):
 
     else:
         y, sr = librosa.load(file_name, offset=0)
-        print("SAMPLE RATE: ", str(sr))
-        test_frame_features = extract_features(y, sr)
+        # print("SAMPLE RATE: ", str(sr))
+        normalized_y = librosa.util.normalize(y)
+
+        test_frame_features = extract_features(normalized_y, sr)
+        
         pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
         idx = np.argmax(pred)
 
         current_speaker = speakers[idx]
-        # print("SPEAKER: " + current_speaker)
         return current_speaker
-
-
-def final_identify_speakers(file_name):
-    # model prediction
-    test_file_path = file_name + "_16.wav"
-    sr = librosa.get_samplerate(test_file_path)
-    stream = librosa.stream(test_file_path,
-                            block_length=1,
-                            frame_length=int(sr*0.04),
-                            hop_length=int(sr*0.04))
-    
-    for y in stream:
-        test_frame_features = extract_features(y, sr)
-        pred = speaker_model.predict(test_frame_features.reshape(1,len(test_frame_features)))
-        idx = np.argmax(pred)
-        print(speakers[idx])
 
 
 @socketio.on("connect")
 def handle_message(data):
     print("===============| Browser Client Connected! |===============\n")
-    # identify_speaker("1sec.wav", average=True)
 
 @socketio.on("begin_transcription")
 def handle_message(data):
-    global is_first, audio_bytes, total_transcript, last_phrase_time, phrase_id
+    global is_first, audio_bytes, total_transcript, last_phrase_time, phrase_id, running_speaker_history
 
     audio_bytes = b"" # clear the saved audio from the previous transcription
     is_first = True
     total_transcript = []
     last_phrase_time = None
     phrase_id = 0
+    running_speaker_history = SpeakerHistoryQueue(speakers) # clear the queue of speaker history
 
     print("===============| begin_transcription |===============\n" + str(data))
     emit("ready_to_receive_chunks")
 
+# # ================================ RECORD DATA FOR TRAINING ================================
+# num_audio_chunks_temp = 0
+# @socketio.on("audio_chunk")
+# def handle_message(data):
+#     global num_audio_chunks_temp
+    
+#     file_pointer = save_chunk_to_tempfile(data)
+#     temp_file_path = file_pointer.name
+#     if is_speaking(temp_file_path):
+#         print(f"audio. saving to training_data_browser/parker/test_shure-{num_audio_chunks_temp}.wav")
+#         with open(f"training_data_browser/parker/test_shure-{num_audio_chunks_temp}.wav", "wb") as audio_file:
+#             # Write bytes to file
+#             audio_file.write(data)
+
+#         num_audio_chunks_temp += 1
+        
+    
+
 @socketio.on("audio_chunk")
 def handle_message(data):
-    global is_first, audio_bytes, silence_time, last_phrase_time, phrase_audio_buffer, phrase_id
+    global is_first, audio_bytes, silence_time, last_phrase_time, phrase_audio_buffer, phrase_id, phrase_class_counts, running_speaker_history, last_output
     
     # update the variables for the total running audio after each audio_chunk is received
     audio_bytes += data if is_first else strip_wav_header(data) # if its not the first chunk, get rid of WAV header (first 44 bytes)
@@ -187,16 +185,28 @@ def handle_message(data):
     if last_phrase_time and now - last_phrase_time > timedelta(seconds=phrase_timeout):
         phrase_audio_buffer = b""
         new_phrase = True
+        phrase_class_counts = {speaker: 0 for speaker in speakers}
+        running_speaker_history = SpeakerHistoryQueue(speakers) # silence, we don't care about detecting a speaker switch since we have a new phrase
         phrase_id += 1 # incremement phrase ID if we're onto a new one
         print("Silence for at least 2 seconds... new phrase ")
+
+
+    # if our current best guess of a speaker for the phrase has not been the majority of the last 5 seconds,
+    # its time to start a new phrase since there's a good chance someone else started talking
+    best_guess_for_phrase = max(phrase_class_counts, key=phrase_class_counts.get)
+    majority_of_last_few_guesses = max(running_speaker_history.counts, key=running_speaker_history.counts.get)
+
+    if best_guess_for_phrase is not majority_of_last_few_guesses: 
+        phrase_audio_buffer = b""
+        new_phrase = True
+        phrase_class_counts = {speaker: 0 for speaker in speakers}
+        phrase_id += 1 # incremement phrase ID if we're onto a new one
+        print("Someone else is speaking! New phrase ")
+
 
     # Voice Activity Detection - check if someone was speaking in this audio clip
     if is_speaking(temp_file_path):
         last_phrase_time = now
-
-        # make a prediction on who is speaking in the chunk and emit it back to the client
-        current_speaker = identify_speaker(temp_file_path)
-        # emit("current_speaker", current_speaker)
 
         # append this audio to the buffer since the person is speaking.
         # if the phrase is a new one, start by keeping wav header, otherwise append chunks with no wav header
@@ -207,22 +217,40 @@ def handle_message(data):
         with open("phrase.wav", 'w+b') as f:
             f.write(phrase_audio_buffer)
 
-        # live transcribe on the audio segment
-        running_transcript = transcribe("phrase.wav")
+        # create a threadpool to execute the two longest running functions (transcribe and identify_speaker) in parallel, then wait for their executions to be complete
 
-        output = {
-            "id": phrase_id,
-            "text": running_transcript,
-            "speaker": current_speaker
-        }
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future1 = executor.submit(transcribe, "phrase.wav")            # live transcribe on the audio segment
+                future2 = executor.submit(identify_speaker, temp_file_path)    # make a prediction on who is speaking in the chunk 
 
-        print("TRANSCRIPT: ", str(output))
-        emit("transcript_update", output)
-        
-        # since we just got someone talking, prepare for more talking from them
-        new_phrase = False
+                running_transcript = future1.result()
+                current_speaker_guess = future2.result()
+
+            phrase_class_counts[current_speaker_guess] += 1         # increment the count of how many times this speaker has been guessed for this phrase
+            print("PHRASE CLASS COUNTS: " + str(phrase_class_counts))
+
+            running_speaker_history.enqueue(current_speaker_guess)  # add the current speaker to the speaker history queue  
+
+            best_speaker_guess = max(phrase_class_counts, key=phrase_class_counts.get)  # the best guess of the current speaker is the one who has been guessed for majority of the phrase
+
+            output = {
+                "id": phrase_id,
+                "text": running_transcript,
+                "speaker": best_speaker_guess
+            }
+            last_output = output # save this to use later if needed
+
+            print("OUTPUT: ", str(output))
+            emit("transcript_update", output)
+
+            # since we just got someone talking, prepare for more talking from them
+            new_phrase = False
+
+        except:
+            print(".\n") # hide the nasty whisper tensor size errors
+            
     # END IF (is_speaking)
-
 
 
     # finally, close the pointer to the temp file -- this should delete the tempfile too

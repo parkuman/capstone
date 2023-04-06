@@ -39,6 +39,8 @@ def add_padding(features, mfcc_max_padding):
 # Mel Frequency Cepstral Coefficients (MFCC)
 def extract_mfcc_old(y, sr):
   mfcc = np.array(librosa.feature.mfcc(y=y, sr=sr, n_mels=128, n_mfcc=12, n_fft=512, hop_length=128))
+  mfcc = librosa.util.normalize(mfcc)
+
   return mfcc
 
 # def extract_melspectrogram(y, sr):
